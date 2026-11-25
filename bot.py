@@ -24,6 +24,21 @@ import config as cfg
 import db
 import keepalive
 import persist
+from ui import (
+    BTN_ADMIN_TASKS,
+    BTN_NEWTASK,
+    BTN_PENDING,
+    BTN_RESULTS,
+    BTN_STUDENTS,
+    BTN_TASKS,
+    MENU_BUTTONS,
+    NOT_CMD,
+    NOT_MENU,
+    TEXT_OR_SKIP,
+    admin_menu,
+    cancel_kb,
+    student_menu,
+)
 
 load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN", "")
@@ -31,19 +46,8 @@ ADMIN_IDS = cfg.ADMIN_IDS
 
 router = Router()
 
-BTN_TASKS = "📚 Vazifalar"
-BTN_RESULTS = "📊 Natijalarim"
-
-
 def is_admin(user_id: int) -> bool:
     return user_id in ADMIN_IDS
-
-
-def student_menu() -> ReplyKeyboardMarkup:
-    return ReplyKeyboardMarkup(
-        keyboard=[[KeyboardButton(text=BTN_TASKS), KeyboardButton(text=BTN_RESULTS)]],
-        resize_keyboard=True,
-    )
 
 
 # ======================= FSM =======================
@@ -115,12 +119,11 @@ async def refresh_membership(bot: Bot, u) -> None:
 
 
 @router.message(Command("students"), F.func(lambda m: is_admin(m.from_user.id)))
-async def admin_students(message: Message, bot: Bot):
+@router.message(F.text == BTN_STUDENTS, F.func(lambda m: is_admin(m.from_user.id)))
+async def admin_students(message: Message, bot: Bot, state: FSMContext):
+    await state.clear()
     if not cfg.group_id:
-        await message.answer(
-            "Guruh ulanmagan. Botni guruhga qo'shing va tasdiqlash tugmasini bosing, "
-            "yoki /setgroup -100... yozing."
-        )
+        await message.answer("Guruh ulanmagan. «⚙️ Sozlamalar» tugmasi orqali guruhni ulang.")
         return
     rows = db.group_members()
     try:
@@ -156,15 +159,9 @@ async def start(message: Message, state: FSMContext, bot: Bot):
     if is_admin(u.id):
         await message.answer(
             "Salom, o'qituvchi! 👨‍🏫\n\n"
-            "/newtask – yangi vazifa berish\n"
-            "/tasks – faol vazifalar\n"
-            "/pending – tekshirilmagan ishlar\n"
-            "/close <id> – vazifani yopish\n"
-            "/students – guruh a'zolari ro'yxati\n"
-            "/setchannel – baza va zahira kanalini ulash\n"
-            "/setgroup – o'quvchilar guruhini ulash\n"
-            "/config – ulangan kanal va guruh\n"
-            "/backup – zahira nusxani hozir yuborish"
+            "Quyidagi tugmalardan foydalaning. Birinchi marta bo'lsa, «⚙️ Sozlamalar» "
+            "orqali yopiq kanal va o'quvchilar guruhini ulang.",
+            reply_markup=admin_menu(),
         )
     else:
         await message.answer(
@@ -176,33 +173,47 @@ async def start(message: Message, state: FSMContext, bot: Bot):
 
 # ======================= TEACHER: yangi vazifa =======================
 @router.message(Command("newtask"), F.func(lambda m: is_admin(m.from_user.id)))
+@router.message(F.text == BTN_NEWTASK, F.func(lambda m: is_admin(m.from_user.id)))
 async def newtask_start(message: Message, state: FSMContext):
     await state.set_state(NewTask.title)
-    await message.answer("Vazifa nomini yozing:")
+    await message.answer("Vazifa nomini yozing:", reply_markup=cancel_kb())
 
 
-@router.message(NewTask.title, F.text)
+@router.message(NewTask.title, F.text, NOT_MENU, NOT_CMD)
 async def newtask_title(message: Message, state: FSMContext):
     await state.update_data(title=message.text.strip())
     await state.set_state(NewTask.description)
-    await message.answer("Vazifa tavsifini yozing (nima qilish kerak):")
+    await message.answer("Vazifa tavsifini yozing (nima qilish kerak):", reply_markup=cancel_kb())
 
 
-@router.message(NewTask.description, F.text)
+@router.message(NewTask.description, F.text, NOT_MENU, NOT_CMD)
 async def newtask_desc(message: Message, state: FSMContext):
     await state.update_data(description=message.text.strip())
     await state.set_state(NewTask.deadline)
-    await message.answer("Topshirish muddati (masalan: 12-noyabr 23:59). Muddat yo'q bo'lsa /skip yozing:")
+    await message.answer(
+        "Topshirish muddatini yozing (masalan: 12-noyabr 23:59) yoki tugmani bosing:",
+        reply_markup=cancel_kb("⏭ Muddatsiz"),
+    )
 
 
-@router.message(NewTask.deadline, F.text)
+@router.message(NewTask.deadline, F.text, NOT_MENU, TEXT_OR_SKIP)
 async def newtask_deadline(message: Message, state: FSMContext, bot: Bot):
     deadline = None if message.text.strip() == "/skip" else message.text.strip()
+    await finish_newtask(bot, message.chat.id, state, deadline)
+
+
+@router.callback_query(F.data == "skip", NewTask.deadline)
+async def newtask_deadline_skip(cb: CallbackQuery, state: FSMContext, bot: Bot):
+    await cb.answer()
+    await finish_newtask(bot, cb.message.chat.id, state, None)
+
+
+async def finish_newtask(bot: Bot, chat_id: int, state: FSMContext, deadline: str | None):
     data = await state.get_data()
     await state.clear()
     task_id = db.add_task(data["title"], data["description"], deadline)
     archive.fire(archive.log_task(bot, task_id))
-    await message.answer(f"✅ Vazifa #{task_id} yaratildi. O'quvchilarga yuborilmoqda...")
+    await bot.send_message(chat_id, f"✅ Vazifa #{task_id} yaratildi. O'quvchilarga yuborilmoqda...")
 
     text = f"📢 Yangi vazifa!\n\n{data['title']}\n\n{data['description']}"
     if deadline:
@@ -219,22 +230,54 @@ async def newtask_deadline(message: Message, state: FSMContext, bot: Bot):
             sent += 1
         except Exception:
             pass
-    await message.answer(f"📨 {sent} ta o'quvchiga yuborildi.")
+    await bot.send_message(chat_id, f"📨 {sent} ta o'quvchiga yuborildi.")
 
 
 # ======================= TEACHER: ro'yxatlar =======================
-@router.message(Command("tasks"), F.func(lambda m: is_admin(m.from_user.id)))
-async def admin_tasks(message: Message):
+def tasks_view():
+    """Faol vazifalar matni va har biri uchun «Yopish» tugmasi."""
     tasks = db.active_tasks()
     if not tasks:
-        await message.answer("Faol vazifalar yo'q.")
-        return
+        return "Faol vazifalar yo'q.", None
     pend = db.pending_count_by_task()
     lines = [
         f"#{t['id']} – {t['title']} (tekshirilmagan: {pend.get(t['id'], 0)})"
         for t in tasks
     ]
-    await message.answer("\n".join(lines))
+    kb = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text=f"🔒 Yopish: #{t['id']} {t['title'][:30]}",
+                    callback_data=f"close:{t['id']}",
+                )
+            ]
+            for t in tasks
+        ]
+    )
+    return "\n".join(lines), kb
+
+
+@router.message(Command("tasks"), F.func(lambda m: is_admin(m.from_user.id)))
+@router.message(F.text == BTN_ADMIN_TASKS, F.func(lambda m: is_admin(m.from_user.id)))
+async def admin_tasks(message: Message, state: FSMContext):
+    await state.clear()
+    text, kb = tasks_view()
+    await message.answer(text, reply_markup=kb)
+
+
+@router.callback_query(F.data.startswith("close:"))
+async def on_close(cb: CallbackQuery):
+    if not is_admin(cb.from_user.id):
+        await cb.answer("Faqat o'qituvchi uchun", show_alert=True)
+        return
+    ok = db.close_task(int(cb.data.split(":")[1]))
+    await cb.answer("✅ Vazifa yopildi." if ok else "Bunday vazifa topilmadi.")
+    text, kb = tasks_view()
+    try:
+        await cb.message.edit_text(text, reply_markup=kb)
+    except Exception:
+        pass
 
 
 @router.message(Command("close"), F.func(lambda m: is_admin(m.from_user.id)))
@@ -273,7 +316,9 @@ async def send_submission(bot: Bot, chat_id: int, sub_id: int):
 
 
 @router.message(Command("pending"), F.func(lambda m: is_admin(m.from_user.id)))
-async def admin_pending(message: Message, bot: Bot):
+@router.message(F.text == BTN_PENDING, F.func(lambda m: is_admin(m.from_user.id)))
+async def admin_pending(message: Message, bot: Bot, state: FSMContext):
+    await state.clear()
     rows = db.pending_submissions()
     if not rows:
         await message.answer("Tekshirilmagan ishlar yo'q 🎉")
@@ -296,18 +341,28 @@ async def on_grade(cb: CallbackQuery, state: FSMContext):
     await state.set_state(Review.comment)
     await state.update_data(sub_id=int(sub_id), grade=grade)
     label = "Qayta topshirish" if grade == "redo" else f"Baho: {grade}"
-    await cb.message.answer(f"{label}. Izoh yozing yoki /skip:")
+    await cb.message.answer(f"{label}. Izoh yozing yoki tugmani bosing:", reply_markup=cancel_kb("⏭ Izohsiz"))
     await cb.answer()
 
 
-@router.message(Review.comment, F.text)
+@router.message(Review.comment, F.text, NOT_MENU, TEXT_OR_SKIP)
 async def on_comment(message: Message, state: FSMContext, bot: Bot):
+    comment = None if message.text.strip() == "/skip" else message.text.strip()
+    await finish_review(bot, message.chat.id, state, comment)
+
+
+@router.callback_query(F.data == "skip", Review.comment)
+async def on_comment_skip(cb: CallbackQuery, state: FSMContext, bot: Bot):
+    await cb.answer()
+    await finish_review(bot, cb.message.chat.id, state, None)
+
+
+async def finish_review(bot: Bot, chat_id: int, state: FSMContext, comment: str | None):
     data = await state.get_data()
     await state.clear()
-    comment = None if message.text.strip() == "/skip" else message.text.strip()
     s = db.get_submission(data["sub_id"])
     if not s or s["status"] != "pending":
-        await message.answer("Bu ish allaqachon tekshirilgan.")
+        await bot.send_message(chat_id, "Bu ish allaqachon tekshirilgan.")
         return
 
     grade = data["grade"]
@@ -323,14 +378,15 @@ async def on_comment(message: Message, state: FSMContext, bot: Bot):
 
     try:
         await bot.send_message(s["user_id"], text)
-        await message.answer("Natija o'quvchiga yuborildi ✅")
+        await bot.send_message(chat_id, "Natija o'quvchiga yuborildi ✅")
     except Exception:
-        await message.answer("Saqlandi, lekin o'quvchiga xabar yuborib bo'lmadi.")
+        await bot.send_message(chat_id, "Saqlandi, lekin o'quvchiga xabar yuborib bo'lmadi.")
 
 
 # ======================= STUDENT: vazifalar =======================
 @router.message(F.text == BTN_TASKS)
-async def student_tasks(message: Message):
+async def student_tasks(message: Message, state: FSMContext):
+    await state.clear()
     tasks = db.active_tasks()
     if not tasks:
         await message.answer("Hozircha faol vazifalar yo'q.")
@@ -380,7 +436,8 @@ async def start_submit(cb: CallbackQuery, state: FSMContext):
     await state.set_state(Submit.waiting)
     await state.update_data(task_id=task_id)
     await cb.message.answer(
-        f"«{t['title']}» uchun javobingizni yuboring (matn, rasm yoki fayl).\nBekor qilish: /cancel"
+        f"«{t['title']}» uchun javobingizni yuboring (matn, rasm yoki fayl).",
+        reply_markup=cancel_kb(),
     )
     await cb.answer()
 
@@ -391,7 +448,17 @@ async def cancel(message: Message, state: FSMContext):
     await message.answer("Bekor qilindi.")
 
 
-@router.message(Submit.waiting, F.text | F.photo | F.document)
+@router.callback_query(F.data == "cancel")
+async def cancel_cb(cb: CallbackQuery, state: FSMContext):
+    await state.clear()
+    await cb.answer("Bekor qilindi")
+    try:
+        await cb.message.edit_reply_markup(reply_markup=None)
+    except Exception:
+        pass
+
+
+@router.message(Submit.waiting, (F.text & NOT_MENU) | F.photo | F.document)
 async def receive_submission(message: Message, state: FSMContext, bot: Bot):
     data = await state.get_data()
     task_id = data["task_id"]
@@ -417,15 +484,18 @@ async def receive_submission(message: Message, state: FSMContext, bot: Bot):
             logging.exception("Adminga yuborib bo'lmadi: %s", admin_id)
 
 
-@router.message(Submit.waiting)
+@router.message(Submit.waiting, F.func(lambda m: (m.text or "") not in MENU_BUTTONS))
 async def submission_wrong_type(message: Message):
-    await message.answer("Iltimos, matn, rasm yoki fayl yuboring (yoki /cancel).")
+    await message.answer(
+        "Iltimos, matn, rasm yoki fayl yuboring.", reply_markup=cancel_kb()
+    )
 
 
 # ======================= STUDENT: natijalar =======================
 @router.message(F.text == BTN_RESULTS)
 @router.message(Command("results"))
-async def my_results(message: Message):
+async def my_results(message: Message, state: FSMContext):
+    await state.clear()
     rows = db.user_results(message.from_user.id)
     if not rows:
         await message.answer("Hali topshirilgan vazifa yo'q.")
@@ -451,6 +521,10 @@ async def main():
     # HTTP server avval ishga tushadi: Render portni tezda topishi kerak.
     runner = await keepalive.start_server()
     bot = Bot(BOT_TOKEN)
+    try:
+        await bot.delete_my_commands()  # buyruqlar o'rniga tugmalar ishlatiladi
+    except Exception:
+        logging.warning("Buyruqlar ro'yxatini tozalab bo'lmadi")
     await cfg.load(bot)  # ulangan kanal/guruh ID lari admin chatidagi pin qilingan xabardan
     await persist.restore(bot)  # kanaldagi snapshotdan bazani tiklaydi
     db.init_db()

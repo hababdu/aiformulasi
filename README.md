@@ -18,16 +18,16 @@ python bot.py
 
 ## Foydalanish
 
-**O'qituvchi** (`ADMIN_IDS` dagi akkauntlar):
-- `/newtask` – nom, tavsif, muddat kiritib vazifa berish (hamma o'quvchilarga yuboriladi)
-- `/tasks` – faol vazifalar va tekshirilmagan ishlar soni
-- `/pending` – tekshirilmagan ishlarni ko'rish
-- `/close <id>` – vazifani yopish
-- `/students` – guruhdan yig'ilgan o'quvchilar ro'yxati
-- `/setchannel`, `/setgroup` – baza kanali va o'quvchilar guruhini ulash
-- `/config` – ulangan kanal va guruh
-- `/backup` – zahira nusxani hozir kanalga va o'zingizga yuborish
-- Kelgan ishda 5 / 4 / 3 / 2 yoki «Qayta topshirsin» tugmasini bosing, so'ng izoh yozing (yoki `/skip`)
+**O'qituvchi** (`ADMIN_IDS` dagi akkauntlar) pastdagi tugmalar bilan ishlaydi:
+- «➕ Yangi vazifa» – nom, tavsif, muddat kiritib vazifa berish (muddatsiz bo'lsa «⏭ Muddatsiz» tugmasi); hamma o'quvchilarga yuboriladi
+- «📋 Vazifalar» – faol vazifalar, tekshirilmagan ishlar soni va har biri uchun «🔒 Yopish» tugmasi
+- «📥 Tekshirilmagan» – tekshirilmagan ishlarni ko'rish; ishda 5 / 4 / 3 / 2 yoki «Qayta topshirsin» tugmasini bosing, so'ng izoh yozing (yoki «⏭ Izohsiz»)
+- «👥 O'quvchilar» – guruhdan yig'ilgan o'quvchilar ro'yxati
+- «🗂 Zahira nusxa» – zahira nusxani hozir kanalga va o'zingizga yuborish
+- «⚙️ Sozlamalar» – ulangan kanal va guruhni ko'rish, «📣 Kanalni ulash» / «👥 Guruhni ulash»
+
+Eski buyruqlar (`/newtask`, `/tasks`, `/pending`, `/close <id>`, `/students`, `/setchannel`, `/setgroup`,
+`/config`, `/backup`) ham ishlaydi, lekin bot ularni ko'rsatmaydi. Har bir bosqichda «❌ Bekor qilish» tugmasi bor.
 
 **O'quvchi:**
 - `/start` bosib ro'yxatdan o'tadi
@@ -45,12 +45,12 @@ saqlanadi. Muhit o'zgaruvchilaridan faqat `BOT_TOKEN` va `ADMIN_IDS` kerak. Kana
 o'qituvchi botning o'zida ulaydi:
 
 1. Botga o'qituvchi sifatida `/start` bosing.
-2. **Yopiq kanal:** kanal yarating va botni admin qiling (xabar yuborish va xabarlarni tahrirlash
+2. **Yopiq kanal** («⚙️ Sozlamalar» → «📣 Kanalni ulash»): kanal yarating va botni admin qiling (xabar yuborish va xabarlarni tahrirlash
    huquqlari bilan). Bot sizga tasdiqlash tugmasini yuboradi, «✅ Ha, ulash» ni bosing.
-   Yoki `/setchannel -100...`.
-3. **O'quvchilar guruhi:** botni guruhga qo'shing (admin qilish tavsiya etiladi), tugmani bosing
-   yoki `/setgroup -100...`.
-4. `/config` ulanganlarni ko'rsatadi. Sozlamalar sizning chatingizda pin qilingan «BOT_CONFIG»
+   Yoki kanal ID sini (`-100...`) tugmadan keyin botga yuboring.
+3. **O'quvchilar guruhi** («👥 Guruhni ulash»): botni guruhga qo'shing (admin qilish tavsiya etiladi), tugmani bosing
+   yoki guruh ID sini yuboring.
+4. «⚙️ Sozlamalar» ulanganlarni ko'rsatadi. Sozlamalar sizning chatingizda pin qilingan «BOT_CONFIG»
    xabarida saqlanadi, uni o'chirmang.
 
 Kanalda to'planadigan zahira:
@@ -59,7 +59,7 @@ Kanalda to'planadigan zahira:
 - Har bir hodisa alohida xabar bo'lib to'planadi: yangi vazifa, o'quvchi topshirig'i (matn, rasm, fayl),
   baho va izoh, o'quvchining guruhga qo'shilishi/chiqishi.
 - O'zgarish bo'lsa, soatiga bir marta CSV hisobot: `oquvchilar.csv`, `vazifalar.csv`,
-  `topshiriqlar_ballar.csv`. `/backup` ularni darhol yuboradi.
+  `topshiriqlar_ballar.csv`. «🗂 Zahira nusxa» ularni darhol yuboradi.
 
 Bepul Web Service 15 daqiqa trafik bo'lmasa uxlaydi, shuning uchun `keepalive.py` kichik HTTP server
 ochadi va har 10 daqiqada (`PING_INTERVAL`, soniyalarda) o'z manziliga so'rov yuboradi.
