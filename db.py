@@ -1,7 +1,8 @@
+import os
 import sqlite3
 from contextlib import closing
 
-DB_PATH = "homework.db"
+DB_PATH = os.getenv("DB_PATH", "homework.db")
 
 
 def _conn():
