@@ -33,3 +33,22 @@ python bot.py
 ## Eslatma
 Ma'lumotlar `homework.db` (SQLite) faylida saqlanadi. O'quvchi botga `/start` bosmaguncha
 yangi vazifa xabarini olmaydi.
+
+## Render (bepul Web Service) da ishlatish
+
+Render bepul rejasida fayl tizimi vaqtinchalik, shuning uchun baza **yopiq Telegram kanalida** saqlanadi:
+
+1. Yopiq kanal yarating, botni admin qiling (xabar yuborish, tahrirlash, pin qilish huquqlari bilan).
+   Kanal ID sini `STORAGE_CHANNEL_ID` ga yozing. Bot kanalga `homework.db` nusxasini yuboradi va pin
+   qiladi, har o'zgarishdan keyin (~30 soniyada) o'sha xabardagi faylni yangilaydi. Qayta ishga
+   tushganda bazani shu fayldan tiklaydi. **Kanaldagi pin qilingan faylni o'chirmang.**
+2. O'quvchilar guruhini botga ulang: botni guruhga qo'shing (admin qilish tavsiya etiladi) va ID sini
+   `GROUP_ID` ga yozing. A'zolar kirish/chiqish hodisalaridan, guruhdagi xabarlardan va `/start`
+   paytida yig'iladi. O'qituvchi `/students` bilan ro'yxatni ko'radi. Vazifa faqat guruh a'zolari
+   bo'lgan va botni ishga tushirgan o'quvchilarga yuboriladi.
+3. Bepul Web Service 15 daqiqa trafik bo'lmasa uxlaydi. `keepalive.py` kichik HTTP server ochadi va
+   har 10 daqiqada (`PING_INTERVAL`, soniyalarda) o'zining ommaviy manziliga so'rov yuboradi.
+4. `render.yaml` Blueprint orqali joylang, so'ng Dashboard da `BOT_TOKEN`, `ADMIN_IDS`,
+   `STORAGE_CHANNEL_ID`, `GROUP_ID` qiymatlarini kiriting.
+
+Cheklov: bot uzilib qolsa, oxirgi ~30 soniyadagi o'zgarishlar yo'qolishi mumkin.

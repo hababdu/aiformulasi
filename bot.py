@@ -9,6 +9,7 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import (
     CallbackQuery,
+    ChatMemberUpdated,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
     KeyboardButton,
@@ -18,10 +19,14 @@ from aiogram.types import (
 from dotenv import load_dotenv
 
 import db
+import keepalive
+import persist
 
 load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN", "")
 ADMIN_IDS = {int(x) for x in os.getenv("ADMIN_IDS", "").replace(" ", "").split(",") if x}
+# O'quvchilar guruhining ID raqami (-100... bilan boshlanadi). Bo'sh bo'lsa, guruh ishlatilmaydi.
+GROUP_ID = int(os.getenv("GROUP_ID", "0") or 0)
 
 router = Router()
 
@@ -55,19 +60,98 @@ class Review(StatesGroup):
     comment = State()
 
 
+# ======================= GURUH: o'quvchilarni yig'ish =======================
+# Telegram botlarga guruh a'zolarining ro'yxatini bermaydi, shuning uchun a'zolar
+# kirish/chiqish hodisalaridan, guruhdagi xabarlardan va /start paytidagi tekshiruvdan yig'iladi.
+MEMBER_STATUSES = {"creator", "administrator", "member"}
+
+
+def _in_chat(cm) -> bool:
+    return cm.status in MEMBER_STATUSES or (
+        cm.status == "restricted" and getattr(cm, "is_member", False)
+    )
+
+
+def _is_student(u) -> bool:
+    return bool(u) and not u.is_bot and not is_admin(u.id)
+
+
+# Guruh handlerlari boshqalardan oldin turishi kerak.
+@router.chat_member(F.chat.id == GROUP_ID)
+async def group_member_update(event: ChatMemberUpdated):
+    u = event.new_chat_member.user
+    if _is_student(u):
+        db.set_in_group(u.id, u.full_name, u.username, _in_chat(event.new_chat_member))
+
+
+@router.message(F.chat.id == GROUP_ID)
+async def group_message(message: Message):
+    if _is_student(message.from_user):
+        u = message.from_user
+        db.set_in_group(u.id, u.full_name, u.username, True)
+    for m in message.new_chat_members or []:
+        if _is_student(m):
+            db.set_in_group(m.id, m.full_name, m.username, True)
+    left = message.left_chat_member
+    if _is_student(left):
+        db.set_in_group(left.id, left.full_name, left.username, False)
+
+
+async def refresh_membership(bot: Bot, u) -> None:
+    """/start bosgan foydalanuvchining guruh a'zoligini Telegramdan so'rab tekshiradi."""
+    if not GROUP_ID or not _is_student(u):
+        return
+    try:
+        cm = await bot.get_chat_member(GROUP_ID, u.id)
+        db.set_in_group(u.id, u.full_name, u.username, _in_chat(cm))
+    except Exception:
+        logging.warning("Guruh a'zoligini tekshirib bo'lmadi: %s", u.id)
+
+
+@router.message(Command("students"), F.func(lambda m: is_admin(m.from_user.id)))
+async def admin_students(message: Message, bot: Bot):
+    if not GROUP_ID:
+        await message.answer("GROUP_ID sozlanmagan.")
+        return
+    rows = db.group_members()
+    try:
+        total = await bot.get_chat_member_count(GROUP_ID)
+    except Exception:
+        total = None
+    started = sum(1 for r in rows if r["started"])
+    head = f"👥 Ro'yxatda: {len(rows)} ta o'quvchi (botni ishga tushirgan: {started})"
+    if total is not None:
+        head += f"\nGuruhda jami: {total} ta a'zo (admin va botlar bilan)"
+    head += (
+        "\nGuruhda yozmagan va botni ishga tushirmagan a'zolar ro'yxatda ko'rinmaydi: "
+        "Telegram botga a'zolar ro'yxatini bermaydi."
+    )
+    lines = [
+        f"{i}. {r['full_name']}"
+        + (f" (@{r['username']})" if r["username"] else "")
+        + ("" if r["started"] else " ⚠️ botni ishga tushirmagan")
+        for i, r in enumerate(rows, 1)
+    ]
+    text = head + ("\n\n" + "\n".join(lines) if lines else "")
+    for i in range(0, len(text), 4000):
+        await message.answer(text[i : i + 4000])
+
+
 # ======================= /start =======================
 @router.message(CommandStart())
-async def start(message: Message, state: FSMContext):
+async def start(message: Message, state: FSMContext, bot: Bot):
     await state.clear()
     u = message.from_user
-    db.upsert_user(u.id, u.full_name, u.username)
+    db.upsert_user(u.id, u.full_name, u.username, started=True)
+    await refresh_membership(bot, u)
     if is_admin(u.id):
         await message.answer(
             "Salom, o'qituvchi! 👨‍🏫\n\n"
             "/newtask – yangi vazifa berish\n"
             "/tasks – faol vazifalar\n"
             "/pending – tekshirilmagan ishlar\n"
-            "/close <id> – vazifani yopish"
+            "/close <id> – vazifani yopish\n"
+            "/students – guruh a'zolari ro'yxati"
         )
     else:
         await message.answer(
@@ -113,7 +197,7 @@ async def newtask_deadline(message: Message, state: FSMContext, bot: Bot):
         inline_keyboard=[[InlineKeyboardButton(text="📤 Topshirish", callback_data=f"submit:{task_id}")]]
     )
     sent = 0
-    for uid in db.all_user_ids():
+    for uid in db.broadcast_ids(bool(GROUP_ID)):
         if is_admin(uid):
             continue
         try:
@@ -305,7 +389,7 @@ async def receive_submission(message: Message, state: FSMContext, bot: Bot):
         ctype, file_id, text = "text", None, message.text
 
     u = message.from_user
-    db.upsert_user(u.id, u.full_name, u.username)
+    db.upsert_user(u.id, u.full_name, u.username, started=True)
     sub_id = db.add_submission(task_id, u.id, ctype, text, file_id)
     await state.clear()
     await message.answer("✅ Vazifa qabul qilindi. O'qituvchi tekshirgach xabar beraman.")
@@ -348,11 +432,29 @@ async def main():
         raise SystemExit("BOT_TOKEN topilmadi. .env faylini to'ldiring.")
     if not ADMIN_IDS:
         logging.warning("ADMIN_IDS bo'sh – o'qituvchi aniqlanmaydi!")
-    db.init_db()
+    # HTTP server avval ishga tushadi: Render portni tezda topishi kerak.
+    runner = await keepalive.start_server()
     bot = Bot(BOT_TOKEN)
+    await persist.restore(bot)  # kanaldagi snapshotdan bazani tiklaydi
+    db.init_db()
     dp = Dispatcher(storage=MemoryStorage())
     dp.include_router(router)
-    await dp.start_polling(bot)
+    background = [
+        asyncio.create_task(keepalive.ping_loop()),
+        asyncio.create_task(persist.autosave_loop(bot)),
+    ]
+    try:
+        await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
+    finally:
+        for t in background:
+            t.cancel()
+        if db.is_dirty():
+            try:
+                await persist.push(bot)  # to'xtashdan oldin oxirgi o'zgarishlarni saqlash
+            except Exception:
+                logging.exception("Yakuniy snapshotni saqlab bo'lmadi")
+        await runner.cleanup()
+        await bot.session.close()
 
 
 if __name__ == "__main__":

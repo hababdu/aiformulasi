@@ -1,8 +1,29 @@
 import os
 import sqlite3
+import threading
 from contextlib import closing
 
 DB_PATH = os.getenv("DB_PATH", "homework.db")
+
+# Baza o'zgarganini bildiradi: persist.py shu belgi bo'yicha kanalga nusxa saqlaydi.
+_dirty = threading.Event()
+
+
+def mark_dirty():
+    _dirty.set()
+
+
+def is_dirty() -> bool:
+    return _dirty.is_set()
+
+
+def clear_dirty():
+    _dirty.clear()
+
+
+def _commit(c):
+    c.commit()
+    _dirty.set()
 
 
 def _conn():
@@ -18,7 +39,9 @@ def init_db():
             CREATE TABLE IF NOT EXISTS users (
                 id INTEGER PRIMARY KEY,
                 full_name TEXT NOT NULL,
-                username TEXT
+                username TEXT,
+                started INTEGER NOT NULL DEFAULT 0,   -- botga /start bosganmi
+                in_group INTEGER NOT NULL DEFAULT 0   -- o'quvchilar guruhi a'zosimi
             );
             CREATE TABLE IF NOT EXISTS tasks (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -42,24 +65,56 @@ def init_db():
             );
             """
         )
-        c.commit()
+        # Eski bazalar uchun ustunlarni qo'shish (yangisida ustun bor, xato e'tiborsiz qoldiriladi)
+        for col in ("started", "in_group"):
+            try:
+                c.execute(f"ALTER TABLE users ADD COLUMN {col} INTEGER NOT NULL DEFAULT 0")
+            except sqlite3.OperationalError:
+                pass
+        _commit(c)
 
 
 # ---------- users ----------
-def upsert_user(user_id: int, full_name: str, username: str | None):
+def upsert_user(user_id: int, full_name: str, username: str | None, started: bool = False):
+    """Foydalanuvchini saqlaydi. started=True bo'lsa, botga /start bosgan deb belgilanadi."""
     with closing(_conn()) as c:
         c.execute(
-            """INSERT INTO users (id, full_name, username) VALUES (?, ?, ?)
+            """INSERT INTO users (id, full_name, username, started) VALUES (?, ?, ?, ?)
                ON CONFLICT(id) DO UPDATE SET full_name=excluded.full_name,
-                                             username=excluded.username""",
-            (user_id, full_name, username),
+                                             username=excluded.username,
+                                             started=MAX(started, excluded.started)""",
+            (user_id, full_name, username, int(started)),
         )
-        c.commit()
+        _commit(c)
 
 
-def all_user_ids() -> list[int]:
+def set_in_group(user_id: int, full_name: str, username: str | None, in_group: bool):
+    """O'quvchining guruh a'zoligini yozadi (started holatiga tegmaydi)."""
     with closing(_conn()) as c:
-        return [r["id"] for r in c.execute("SELECT id FROM users")]
+        c.execute(
+            """INSERT INTO users (id, full_name, username, in_group) VALUES (?, ?, ?, ?)
+               ON CONFLICT(id) DO UPDATE SET full_name=excluded.full_name,
+                                             username=excluded.username,
+                                             in_group=excluded.in_group""",
+            (user_id, full_name, username, int(in_group)),
+        )
+        _commit(c)
+
+
+def broadcast_ids(group_only: bool) -> list[int]:
+    """Xabar yuboriladigan o'quvchilar: botga /start bosganlar (va guruh a'zolari)."""
+    sql = "SELECT id FROM users WHERE started=1"
+    if group_only:
+        sql += " AND in_group=1"
+    with closing(_conn()) as c:
+        return [r["id"] for r in c.execute(sql)]
+
+
+def group_members():
+    with closing(_conn()) as c:
+        return c.execute(
+            "SELECT full_name, username, started FROM users WHERE in_group=1 ORDER BY full_name"
+        ).fetchall()
 
 
 # ---------- tasks ----------
@@ -69,7 +124,7 @@ def add_task(title: str, description: str, deadline: str | None) -> int:
             "INSERT INTO tasks (title, description, deadline) VALUES (?, ?, ?)",
             (title, description, deadline),
         )
-        c.commit()
+        _commit(c)
         return cur.lastrowid
 
 
@@ -88,7 +143,7 @@ def active_tasks():
 def close_task(task_id: int) -> bool:
     with closing(_conn()) as c:
         cur = c.execute("UPDATE tasks SET active=0 WHERE id=?", (task_id,))
-        c.commit()
+        _commit(c)
         return cur.rowcount > 0
 
 
@@ -109,7 +164,7 @@ def add_submission(task_id, user_id, content_type, text, file_id) -> int:
                VALUES (?, ?, ?, ?, ?)""",
             (task_id, user_id, content_type, text, file_id),
         )
-        c.commit()
+        _commit(c)
         return cur.lastrowid
 
 
@@ -150,7 +205,7 @@ def review_submission(sub_id: int, status: str, grade: str | None, comment: str 
             "UPDATE submissions SET status=?, grade=?, comment=? WHERE id=?",
             (status, grade, comment, sub_id),
         )
-        c.commit()
+        _commit(c)
 
 
 def user_results(user_id: int):

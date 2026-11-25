@@ -1,11 +1,12 @@
 services:
-  - type: worker
+  - type: web
     name: aiformulasi-bot
     runtime: python
-    plan: starter
+    plan: free
     region: frankfurt
     buildCommand: pip install -r requirements.txt
     startCommand: python bot.py
+    healthCheckPath: /health
     envVars:
       - key: PYTHON_VERSION
         value: "3.12.3"
@@ -13,9 +14,7 @@ services:
         sync: false
       - key: ADMIN_IDS
         sync: false
-      - key: DB_PATH
-        value: /data/homework.db
-    disk:
-      name: bot-data
-      mountPath: /data
-      sizeGB: 1
+      - key: STORAGE_CHANNEL_ID
+        sync: false
+      - key: GROUP_ID
+        sync: false
