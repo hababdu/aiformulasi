@@ -23,6 +23,10 @@ python bot.py
 - `/tasks` – faol vazifalar va tekshirilmagan ishlar soni
 - `/pending` – tekshirilmagan ishlarni ko'rish
 - `/close <id>` – vazifani yopish
+- `/students` – guruhdan yig'ilgan o'quvchilar ro'yxati
+- `/setchannel`, `/setgroup` – baza kanali va o'quvchilar guruhini ulash
+- `/config` – ulangan kanal va guruh
+- `/backup` – zahira nusxani hozir kanalga va o'zingizga yuborish
 - Kelgan ishda 5 / 4 / 3 / 2 yoki «Qayta topshirsin» tugmasini bosing, so'ng izoh yozing (yoki `/skip`)
 
 **O'quvchi:**
@@ -36,19 +40,30 @@ yangi vazifa xabarini olmaydi.
 
 ## Render (bepul Web Service) da ishlatish
 
-Render bepul rejasida fayl tizimi vaqtinchalik, shuning uchun baza **yopiq Telegram kanalida** saqlanadi:
+Render bepul rejasida fayl tizimi vaqtinchalik, shuning uchun hamma ma'lumot **yopiq Telegram kanalida**
+saqlanadi. Muhit o'zgaruvchilaridan faqat `BOT_TOKEN` va `ADMIN_IDS` kerak. Kanal va guruh ID larini
+o'qituvchi botning o'zida ulaydi:
 
-1. Yopiq kanal yarating, botni admin qiling (xabar yuborish, tahrirlash, pin qilish huquqlari bilan).
-   Kanal ID sini `STORAGE_CHANNEL_ID` ga yozing. Bot kanalga `homework.db` nusxasini yuboradi va pin
-   qiladi, har o'zgarishdan keyin (~30 soniyada) o'sha xabardagi faylni yangilaydi. Qayta ishga
-   tushganda bazani shu fayldan tiklaydi. **Kanaldagi pin qilingan faylni o'chirmang.**
-2. O'quvchilar guruhini botga ulang: botni guruhga qo'shing (admin qilish tavsiya etiladi) va ID sini
-   `GROUP_ID` ga yozing. A'zolar kirish/chiqish hodisalaridan, guruhdagi xabarlardan va `/start`
-   paytida yig'iladi. O'qituvchi `/students` bilan ro'yxatni ko'radi. Vazifa faqat guruh a'zolari
-   bo'lgan va botni ishga tushirgan o'quvchilarga yuboriladi.
-3. Bepul Web Service 15 daqiqa trafik bo'lmasa uxlaydi. `keepalive.py` kichik HTTP server ochadi va
-   har 10 daqiqada (`PING_INTERVAL`, soniyalarda) o'zining ommaviy manziliga so'rov yuboradi.
-4. `render.yaml` Blueprint orqali joylang, so'ng Dashboard da `BOT_TOKEN`, `ADMIN_IDS`,
-   `STORAGE_CHANNEL_ID`, `GROUP_ID` qiymatlarini kiriting.
+1. Botga o'qituvchi sifatida `/start` bosing.
+2. **Yopiq kanal:** kanal yarating va botni admin qiling (xabar yuborish va xabarlarni tahrirlash
+   huquqlari bilan). Bot sizga tasdiqlash tugmasini yuboradi, «✅ Ha, ulash» ni bosing.
+   Yoki `/setchannel -100...`.
+3. **O'quvchilar guruhi:** botni guruhga qo'shing (admin qilish tavsiya etiladi), tugmani bosing
+   yoki `/setgroup -100...`.
+4. `/config` ulanganlarni ko'rsatadi. Sozlamalar sizning chatingizda pin qilingan «BOT_CONFIG»
+   xabarida saqlanadi, uni o'chirmang.
 
-Cheklov: bot uzilib qolsa, oxirgi ~30 soniyadagi o'zgarishlar yo'qolishi mumkin.
+Kanalda to'planadigan zahira:
+- `homework.db` ning joriy nusxasi (pin qilingan, o'zgarishdan keyin ~30 soniyada yangilanadi).
+  Qayta ishga tushganda baza shu fayldan tiklanadi. **Uni o'chirmang.**
+- Har bir hodisa alohida xabar bo'lib to'planadi: yangi vazifa, o'quvchi topshirig'i (matn, rasm, fayl),
+  baho va izoh, o'quvchining guruhga qo'shilishi/chiqishi.
+- O'zgarish bo'lsa, soatiga bir marta CSV hisobot: `oquvchilar.csv`, `vazifalar.csv`,
+  `topshiriqlar_ballar.csv`. `/backup` ularni darhol yuboradi.
+
+Bepul Web Service 15 daqiqa trafik bo'lmasa uxlaydi, shuning uchun `keepalive.py` kichik HTTP server
+ochadi va har 10 daqiqada (`PING_INTERVAL`, soniyalarda) o'z manziliga so'rov yuboradi.
+
+Cheklov: bot to'satdan uzilsa, baza nusxasidagi oxirgi ~30 soniya o'zgarishlari yo'qolishi mumkin
+(hodisa xabarlari esa kanalda qoladi). Telegram botga guruh a'zolari ro'yxatini bermaydi, shuning
+uchun o'quvchilar guruhga kirganda, yozganda yoki botga `/start` bosganda ro'yxatga olinadi.

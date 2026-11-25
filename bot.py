@@ -18,15 +18,16 @@ from aiogram.types import (
 )
 from dotenv import load_dotenv
 
+import admin_setup
+import archive
+import config as cfg
 import db
 import keepalive
 import persist
 
 load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN", "")
-ADMIN_IDS = {int(x) for x in os.getenv("ADMIN_IDS", "").replace(" ", "").split(",") if x}
-# O'quvchilar guruhining ID raqami (-100... bilan boshlanadi). Bo'sh bo'lsa, guruh ishlatilmaydi.
-GROUP_ID = int(os.getenv("GROUP_ID", "0") or 0)
+ADMIN_IDS = cfg.ADMIN_IDS
 
 router = Router()
 
@@ -76,46 +77,54 @@ def _is_student(u) -> bool:
     return bool(u) and not u.is_bot and not is_admin(u.id)
 
 
+def is_group(chat_id: int) -> bool:
+    """O'quvchilar guruhi admin tomonidan botning o'zida ulanadi (cfg.group_id)."""
+    return bool(cfg.group_id) and chat_id == cfg.group_id
+
+
+async def _track(bot: Bot, u, in_group: bool) -> None:
+    """A'zolik holatini yozadi; o'zgargan bo'lsa, kanalga arxiv xabari yuboradi."""
+    if _is_student(u) and db.set_in_group(u.id, u.full_name, u.username, in_group):
+        archive.fire(archive.log_student(bot, u.full_name, u.username, in_group))
+
+
 # Guruh handlerlari boshqalardan oldin turishi kerak.
-@router.chat_member(F.chat.id == GROUP_ID)
-async def group_member_update(event: ChatMemberUpdated):
-    u = event.new_chat_member.user
-    if _is_student(u):
-        db.set_in_group(u.id, u.full_name, u.username, _in_chat(event.new_chat_member))
+@router.chat_member(F.func(lambda e: is_group(e.chat.id)))
+async def group_member_update(event: ChatMemberUpdated, bot: Bot):
+    await _track(bot, event.new_chat_member.user, _in_chat(event.new_chat_member))
 
 
-@router.message(F.chat.id == GROUP_ID)
-async def group_message(message: Message):
-    if _is_student(message.from_user):
-        u = message.from_user
-        db.set_in_group(u.id, u.full_name, u.username, True)
+@router.message(F.func(lambda m: is_group(m.chat.id)))
+async def group_message(message: Message, bot: Bot):
+    await _track(bot, message.from_user, True)
     for m in message.new_chat_members or []:
-        if _is_student(m):
-            db.set_in_group(m.id, m.full_name, m.username, True)
-    left = message.left_chat_member
-    if _is_student(left):
-        db.set_in_group(left.id, left.full_name, left.username, False)
+        await _track(bot, m, True)
+    await _track(bot, message.left_chat_member, False)
 
 
 async def refresh_membership(bot: Bot, u) -> None:
     """/start bosgan foydalanuvchining guruh a'zoligini Telegramdan so'rab tekshiradi."""
-    if not GROUP_ID or not _is_student(u):
+    if not cfg.group_id or not _is_student(u):
         return
     try:
-        cm = await bot.get_chat_member(GROUP_ID, u.id)
-        db.set_in_group(u.id, u.full_name, u.username, _in_chat(cm))
+        cm = await bot.get_chat_member(cfg.group_id, u.id)
     except Exception:
         logging.warning("Guruh a'zoligini tekshirib bo'lmadi: %s", u.id)
+        return
+    await _track(bot, u, _in_chat(cm))
 
 
 @router.message(Command("students"), F.func(lambda m: is_admin(m.from_user.id)))
 async def admin_students(message: Message, bot: Bot):
-    if not GROUP_ID:
-        await message.answer("GROUP_ID sozlanmagan.")
+    if not cfg.group_id:
+        await message.answer(
+            "Guruh ulanmagan. Botni guruhga qo'shing va tasdiqlash tugmasini bosing, "
+            "yoki /setgroup -100... yozing."
+        )
         return
     rows = db.group_members()
     try:
-        total = await bot.get_chat_member_count(GROUP_ID)
+        total = await bot.get_chat_member_count(cfg.group_id)
     except Exception:
         total = None
     started = sum(1 for r in rows if r["started"])
@@ -151,7 +160,11 @@ async def start(message: Message, state: FSMContext, bot: Bot):
             "/tasks – faol vazifalar\n"
             "/pending – tekshirilmagan ishlar\n"
             "/close <id> – vazifani yopish\n"
-            "/students – guruh a'zolari ro'yxati"
+            "/students – guruh a'zolari ro'yxati\n"
+            "/setchannel – baza va zahira kanalini ulash\n"
+            "/setgroup – o'quvchilar guruhini ulash\n"
+            "/config – ulangan kanal va guruh\n"
+            "/backup – zahira nusxani hozir yuborish"
         )
     else:
         await message.answer(
@@ -188,6 +201,7 @@ async def newtask_deadline(message: Message, state: FSMContext, bot: Bot):
     data = await state.get_data()
     await state.clear()
     task_id = db.add_task(data["title"], data["description"], deadline)
+    archive.fire(archive.log_task(bot, task_id))
     await message.answer(f"✅ Vazifa #{task_id} yaratildi. O'quvchilarga yuborilmoqda...")
 
     text = f"📢 Yangi vazifa!\n\n{data['title']}\n\n{data['description']}"
@@ -197,7 +211,7 @@ async def newtask_deadline(message: Message, state: FSMContext, bot: Bot):
         inline_keyboard=[[InlineKeyboardButton(text="📤 Topshirish", callback_data=f"submit:{task_id}")]]
     )
     sent = 0
-    for uid in db.broadcast_ids(bool(GROUP_ID)):
+    for uid in db.broadcast_ids(bool(cfg.group_id)):
         if is_admin(uid):
             continue
         try:
@@ -305,6 +319,7 @@ async def on_comment(message: Message, state: FSMContext, bot: Bot):
         text = f"✅ «{s['task_title']}» vazifangiz tekshirildi.\nBaho: {grade}"
     if comment:
         text += f"\n💬 Izoh: {comment}"
+    archive.fire(archive.log_review(bot, s["id"]))
 
     try:
         await bot.send_message(s["user_id"], text)
@@ -391,6 +406,7 @@ async def receive_submission(message: Message, state: FSMContext, bot: Bot):
     u = message.from_user
     db.upsert_user(u.id, u.full_name, u.username, started=True)
     sub_id = db.add_submission(task_id, u.id, ctype, text, file_id)
+    archive.fire(archive.log_submission(bot, sub_id))
     await state.clear()
     await message.answer("✅ Vazifa qabul qilindi. O'qituvchi tekshirgach xabar beraman.")
 
@@ -435,13 +451,16 @@ async def main():
     # HTTP server avval ishga tushadi: Render portni tezda topishi kerak.
     runner = await keepalive.start_server()
     bot = Bot(BOT_TOKEN)
+    await cfg.load(bot)  # ulangan kanal/guruh ID lari admin chatidagi pin qilingan xabardan
     await persist.restore(bot)  # kanaldagi snapshotdan bazani tiklaydi
     db.init_db()
     dp = Dispatcher(storage=MemoryStorage())
+    dp.include_router(admin_setup.router)
     dp.include_router(router)
     background = [
         asyncio.create_task(keepalive.ping_loop()),
         asyncio.create_task(persist.autosave_loop(bot)),
+        asyncio.create_task(archive.report_loop(bot)),
     ]
     try:
         await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())

@@ -7,6 +7,8 @@ DB_PATH = os.getenv("DB_PATH", "homework.db")
 
 # Baza o'zgarganini bildiradi: persist.py shu belgi bo'yicha kanalga nusxa saqlaydi.
 _dirty = threading.Event()
+# CSV hisobotlar (archive.py) uchun alohida belgi: ikkalasi ham har yozuvda yoqiladi.
+_report_dirty = threading.Event()
 
 
 def mark_dirty():
@@ -21,9 +23,22 @@ def clear_dirty():
     _dirty.clear()
 
 
+def mark_report_dirty():
+    _report_dirty.set()
+
+
+def report_is_dirty() -> bool:
+    return _report_dirty.is_set()
+
+
+def clear_report_dirty():
+    _report_dirty.clear()
+
+
 def _commit(c):
     c.commit()
     _dirty.set()
+    _report_dirty.set()
 
 
 def _conn():
@@ -88,9 +103,14 @@ def upsert_user(user_id: int, full_name: str, username: str | None, started: boo
         _commit(c)
 
 
-def set_in_group(user_id: int, full_name: str, username: str | None, in_group: bool):
-    """O'quvchining guruh a'zoligini yozadi (started holatiga tegmaydi)."""
+def set_in_group(user_id: int, full_name: str, username: str | None, in_group: bool) -> bool:
+    """O'quvchining guruh a'zoligini yozadi (started holatiga tegmaydi).
+
+    A'zolik holati o'zgargan bo'lsa True qaytaradi (yangi qo'shildi yoki chiqib ketdi).
+    """
     with closing(_conn()) as c:
+        row = c.execute("SELECT in_group FROM users WHERE id=?", (user_id,)).fetchone()
+        changed = bool(in_group) if row is None else bool(row["in_group"]) != bool(in_group)
         c.execute(
             """INSERT INTO users (id, full_name, username, in_group) VALUES (?, ?, ?, ?)
                ON CONFLICT(id) DO UPDATE SET full_name=excluded.full_name,
@@ -99,6 +119,7 @@ def set_in_group(user_id: int, full_name: str, username: str | None, in_group: b
             (user_id, full_name, username, int(in_group)),
         )
         _commit(c)
+        return changed
 
 
 def broadcast_ids(group_only: bool) -> list[int]:
@@ -115,6 +136,44 @@ def group_members():
         return c.execute(
             "SELECT full_name, username, started FROM users WHERE in_group=1 ORDER BY full_name"
         ).fetchall()
+
+
+def is_empty() -> bool:
+    """Bazada hali foydalanuvchi ham, vazifa ham yo'qmi (yoki fayl umuman yo'qmi)."""
+    if not os.path.exists(DB_PATH):
+        return True
+    try:
+        with closing(_conn()) as c:
+            n = c.execute(
+                "SELECT (SELECT COUNT(*) FROM users) + (SELECT COUNT(*) FROM tasks)"
+            ).fetchone()[0]
+        return n == 0
+    except sqlite3.Error:
+        return True
+
+
+def export_all() -> dict[str, list[tuple]]:
+    """CSV zahira uchun: o'quvchilar, vazifalar va topshiriqlar (ballar bilan)."""
+    with closing(_conn()) as c:
+        students = c.execute(
+            "SELECT id, full_name, username, in_group, started FROM users ORDER BY full_name"
+        ).fetchall()
+        tasks = c.execute(
+            "SELECT id, title, description, deadline, active, created_at FROM tasks ORDER BY id"
+        ).fetchall()
+        subs = c.execute(
+            """SELECT s.id, t.title, u.full_name, u.username, s.content_type, s.text,
+                      s.status, s.grade, s.comment, s.created_at
+               FROM submissions s
+               JOIN tasks t ON t.id = s.task_id
+               JOIN users u ON u.id = s.user_id
+               ORDER BY s.id"""
+        ).fetchall()
+    return {
+        "students": [tuple(r) for r in students],
+        "tasks": [tuple(r) for r in tasks],
+        "submissions": [tuple(r) for r in subs],
+    }
 
 
 # ---------- tasks ----------
