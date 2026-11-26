@@ -349,3 +349,24 @@ def student_summary(user_id: int) -> dict:
         "total_tasks": len(snap["tasks"]),
         "active_missing": [t["title"] for t in active if t["id"] not in done],
     }
+
+
+def checked_submissions(kind: str, limit: int, offset: int) -> tuple[list, int]:
+    """Tekshirilgan ishlar. kind='graded' – baholanganlar; kind='redo' – hali qayta topshirilmagan,
+    qaytarilgan ishlar. Yangilari birinchi. (qatorlar, jami soni) qaytaradi."""
+    if kind == "redo":
+        where = """s.status='redo' AND s.id = (SELECT MAX(id) FROM submissions
+                   WHERE task_id=s.task_id AND user_id=s.user_id)"""
+    else:
+        where = "s.status='graded'"
+    with closing(_conn()) as c:
+        total = c.execute(f"SELECT COUNT(*) FROM submissions s WHERE {where}").fetchone()[0]
+        rows = c.execute(
+            f"""SELECT s.id, s.grade, s.comment, s.created_at, u.full_name, u.username, t.title AS task_title
+                FROM submissions s
+                JOIN users u ON u.id = s.user_id
+                JOIN tasks t ON t.id = s.task_id
+                WHERE {where} ORDER BY s.id DESC LIMIT ? OFFSET ?""",
+            (limit, offset),
+        ).fetchall()
+    return rows, total

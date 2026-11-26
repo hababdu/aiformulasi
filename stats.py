@@ -6,7 +6,7 @@ from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMar
 
 import config as cfg
 import db
-from ui import BTN_STATS
+from ui import BTN_CHECKED, BTN_STATS
 
 router = Router()
 MAX_LEN = 3900
@@ -167,3 +167,69 @@ async def stats_tab(cb: CallbackQuery):
         await cb.answer()
     except Exception:  # matn o'zgarmagan bo'lsa Telegram xato qaytaradi
         await cb.answer("Yangilandi, o'zgarish yo'q")
+
+
+# ======================= Tekshirilgan ishlar ro'yxati =======================
+PAGE = 8
+
+
+def _short(text: str | None, n: int = 80) -> str:
+    text = " ".join((text or "").split())
+    return text if len(text) <= n else text[: n - 1] + "…"
+
+
+def checked_view(kind: str, page: int) -> tuple[str, InlineKeyboardMarkup]:
+    kind = "redo" if kind == "redo" else "graded"
+    page = max(page, 0)
+    rows, total = db.checked_submissions(kind, PAGE, page * PAGE)
+    pages = max((total + PAGE - 1) // PAGE, 1)
+    if page >= pages:  # oxirgi sahifadan keyin qolgan bo'lsa
+        page = pages - 1
+        rows, total = db.checked_submissions(kind, PAGE, page * PAGE)
+    title = "✅ Baholangan ishlar" if kind == "graded" else "🔁 Qaytarilgan ishlar (qayta topshirilmagan)"
+    out = [f"{title}: {total} ta", ""]
+    if not rows:
+        out.append("Hozircha yo'q.")
+    for r in rows:
+        who = r["full_name"] + (f" (@{r['username']})" if r["username"] else "")
+        head = f"⭐ {r['grade']}/10" if kind == "graded" else "🔁 qaytarilgan"
+        out.append(f"{head} · {who}")
+        out.append(f"   📚 {r['task_title']}")
+        if r["comment"]:
+            out.append(f"   💬 {_short(r['comment'])}")
+        out.append("")
+    if pages > 1:
+        out.append(f"Sahifa {page + 1}/{pages}")
+    tabs = [
+        InlineKeyboardButton(text=("• " if kind == "graded" else "") + "✅ Baholangan", callback_data="ck:graded:0"),
+        InlineKeyboardButton(text=("• " if kind == "redo" else "") + "🔁 Qaytarilgan", callback_data="ck:redo:0"),
+    ]
+    pager = []
+    if page > 0:
+        pager.append(InlineKeyboardButton(text="◀️", callback_data=f"ck:{kind}:{page - 1}"))
+    if page < pages - 1:
+        pager.append(InlineKeyboardButton(text="▶️", callback_data=f"ck:{kind}:{page + 1}"))
+    kb = [tabs] + ([pager] if pager else [])
+    return _cut("\n".join(out).rstrip()), InlineKeyboardMarkup(inline_keyboard=kb)
+
+
+@router.message(F.text == BTN_CHECKED, F.func(lambda m: cfg.is_admin(m.from_user.id)))
+@router.message(Command("checked"), F.func(lambda m: cfg.is_admin(m.from_user.id)))
+async def admin_checked(message: Message, state: FSMContext):
+    await state.clear()
+    text, kb = checked_view("graded", 0)
+    await message.answer(text, reply_markup=kb)
+
+
+@router.callback_query(F.data.startswith("ck:"))
+async def checked_tab(cb: CallbackQuery):
+    if not cfg.is_admin(cb.from_user.id):
+        await cb.answer("Faqat o'qituvchi uchun", show_alert=True)
+        return
+    _, kind, page = cb.data.split(":")
+    text, kb = checked_view(kind, int(page))
+    try:
+        await cb.message.edit_text(text, reply_markup=kb)
+        await cb.answer()
+    except Exception:
+        await cb.answer("O'zgarish yo'q")

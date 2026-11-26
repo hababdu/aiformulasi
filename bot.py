@@ -292,12 +292,11 @@ async def admin_close(message: Message):
 
 
 def review_keyboard(sub_id: int) -> InlineKeyboardMarkup:
-    grades = [
-        InlineKeyboardButton(text=g, callback_data=f"grade:{sub_id}:{g}")
-        for g in ("5", "4", "3", "2")
-    ]
+    def row(nums):
+        return [InlineKeyboardButton(text=str(g), callback_data=f"grade:{sub_id}:{g}") for g in nums]
+
     redo = [InlineKeyboardButton(text="🔁 Qayta topshirsin", callback_data=f"grade:{sub_id}:redo")]
-    return InlineKeyboardMarkup(inline_keyboard=[grades, redo])
+    return InlineKeyboardMarkup(inline_keyboard=[row(range(10, 5, -1)), row(range(5, 0, -1)), redo])
 
 
 async def send_submission(bot: Bot, chat_id: int, sub_id: int):
@@ -341,19 +340,33 @@ async def on_grade(cb: CallbackQuery, state: FSMContext):
         return
     await state.set_state(Review.comment)
     await state.update_data(sub_id=int(sub_id), grade=grade)
-    label = "Qayta topshirish" if grade == "redo" else f"Baho: {grade}"
-    await cb.message.answer(f"{label}. Izoh yozing yoki tugmani bosing:", reply_markup=cancel_kb("⏭ Izohsiz"))
+    if grade == "redo":
+        # Qaytarilgan ishda izoh majburiy: o'quvchi nimani tuzatishini bilishi kerak.
+        await cb.message.answer(
+            "🔁 Qayta topshirish. O'quvchiga nimani tuzatish kerakligini yozing (izoh o'quvchiga yuboriladi):",
+            reply_markup=cancel_kb(),
+        )
+    else:
+        await cb.message.answer(
+            f"Baho: {grade}/10. Izoh yozing yoki tugmani bosing:", reply_markup=cancel_kb("⏭ Izohsiz")
+        )
     await cb.answer()
 
 
 @router.message(Review.comment, F.text, NOT_MENU, TEXT_OR_SKIP)
 async def on_comment(message: Message, state: FSMContext, bot: Bot):
     comment = None if message.text.strip() == "/skip" else message.text.strip()
+    if comment is None and (await state.get_data()).get("grade") == "redo":
+        await message.answer("Qaytarilgan ishga izoh yozing: o'quvchi nimani tuzatishini bilishi kerak.", reply_markup=cancel_kb())
+        return
     await finish_review(bot, message.chat.id, state, comment)
 
 
 @router.callback_query(F.data == "skip", Review.comment)
 async def on_comment_skip(cb: CallbackQuery, state: FSMContext, bot: Bot):
+    if (await state.get_data()).get("grade") == "redo":
+        await cb.answer("Qaytarilgan ishga izoh yozish kerak.", show_alert=True)
+        return
     await cb.answer()
     await finish_review(bot, cb.message.chat.id, state, None)
 
@@ -370,15 +383,21 @@ async def finish_review(bot: Bot, chat_id: int, state: FSMContext, comment: str 
     if grade == "redo":
         db.review_submission(s["id"], "redo", None, comment)
         text = f"🔁 «{s['task_title']}» vazifangizni qayta topshiring."
+        if comment:
+            text += f"\n💬 O'qituvchi izohi: {comment}"
+        redo_kb = InlineKeyboardMarkup(
+            inline_keyboard=[[InlineKeyboardButton(text="📤 Qayta topshirish", callback_data=f"submit:{s['task_id']}")]]
+        )
     else:
         db.review_submission(s["id"], "graded", grade, comment)
-        text = f"✅ «{s['task_title']}» vazifangiz tekshirildi.\nBaho: {grade}"
-    if comment:
+        text = f"✅ «{s['task_title']}» vazifangiz tekshirildi.\nBaho: {grade}/10"
+        redo_kb = None
+    if comment and grade != "redo":
         text += f"\n💬 Izoh: {comment}"
     archive.fire(archive.log_review(bot, s["id"]))
 
     try:
-        await bot.send_message(s["user_id"], text)
+        await bot.send_message(s["user_id"], text, reply_markup=redo_kb)
         await bot.send_message(chat_id, "Natija o'quvchiga yuborildi ✅")
     except Exception:
         await bot.send_message(chat_id, "Saqlandi, lekin o'quvchiga xabar yuborib bo'lmadi.")
@@ -506,7 +525,7 @@ async def my_results(message: Message, state: FSMContext):
     status_txt = {"pending": "⏳ tekshirilmoqda", "redo": "🔁 qayta topshiring"}
     lines = []
     for r in rows:
-        st = f"✅ baho: {r['grade']}" if r["status"] == "graded" else status_txt[r["status"]]
+        st = f"✅ baho: {r['grade']}/10" if r["status"] == "graded" else status_txt[r["status"]]
         line = f"• {r['task_title']} – {st}"
         if r["comment"]:
             line += f"\n   💬 {r['comment']}"
