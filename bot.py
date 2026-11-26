@@ -477,12 +477,7 @@ async def receive_submission(message: Message, state: FSMContext, bot: Bot):
     archive.fire(archive.log_submission(bot, sub_id))
     await state.clear()
     await message.answer("✅ Vazifa qabul qilindi. O'qituvchi tekshirgach xabar beraman.")
-
-    for admin_id in ADMIN_IDS:
-        try:
-            await send_submission(bot, admin_id, sub_id)
-        except Exception:
-            logging.exception("Adminga yuborib bo'lmadi: %s", admin_id)
+    # O'qituvchiga o'zi yuborilmaydi: ishlar «📥 Tekshirilmagan» tugmasi bosilganda ko'rsatiladi.
 
 
 @router.message(Submit.waiting, F.func(lambda m: (m.text or "") not in MENU_BUTTONS))
