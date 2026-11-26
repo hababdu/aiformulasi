@@ -32,8 +32,12 @@ admin_only = F.func(lambda m: bool(m.from_user) and cfg.is_admin(m.from_user.id)
 async def connect_channel(bot: Bot, chat_id: int) -> tuple[bool, str]:
     try:
         chat = await bot.get_chat(chat_id)
-    except Exception:
-        return False, "Kanal topilmadi. ID to'g'riligini va bot kanalga qo'shilganini tekshiring."
+    except Exception as e:
+        logging.warning("get_chat(%s) xato: %s", chat_id, e)
+        return False, (
+            f"Kanal topilmadi ({e}).\nBotni kanalga ADMIN qilib qo'shing (Kanal → Administratorlar → "
+            "Administrator qo'shish → botni tanlang). Shunda men o'zim tasdiqlash tugmasini yuboraman, ID kerak emas."
+        )
     if chat.type != "channel":
         return False, "Bu kanal emas. Baza uchun yopiq KANAL kerak."
     try:
@@ -70,8 +74,9 @@ async def connect_channel(bot: Bot, chat_id: int) -> tuple[bool, str]:
 async def connect_group(bot: Bot, chat_id: int) -> tuple[bool, str]:
     try:
         chat = await bot.get_chat(chat_id)
-    except Exception:
-        return False, "Guruh topilmadi. ID to'g'riligini va bot guruhga qo'shilganini tekshiring."
+    except Exception as e:
+        logging.warning("get_chat(%s) xato: %s", chat_id, e)
+        return False, f"Guruh topilmadi ({e}). Botni guruhga qo'shing, men tasdiqlash tugmasini yuboraman."
     if chat.type not in ("group", "supergroup"):
         return False, "Bu guruh emas."
     cfg.group_id = chat_id
