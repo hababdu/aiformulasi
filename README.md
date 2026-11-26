@@ -23,6 +23,7 @@ python bot.py
 - «📋 Vazifalar» – faol vazifalar, tekshirilmagan ishlar soni va har biri uchun «🔒 Yopish» tugmasi
 - «📥 Tekshirilmagan» – tekshirilmagan ishlarni ko'rish; ishda 5 / 4 / 3 / 2 yoki «Qayta topshirsin» tugmasini bosing, so'ng izoh yozing (yoki «⏭ Izohsiz»)
 - «👥 O'quvchilar» – guruhdan yig'ilgan o'quvchilar ro'yxati
+- «📊 Statistika» – umumiy ko'rinish, vazifalar bo'yicha topshirish foizi, o'quvchilar reytingi va topshirmaganlar ro'yxati (bo'limlar tugmalar bilan almashadi)
 - «🗂 Zahira nusxa» – zahira nusxani hozir kanalga va o'zingizga yuborish
 - «⚙️ Sozlamalar» – ulangan kanal va guruhni ko'rish, «📣 Kanalni ulash» / «👥 Guruhni ulash»
 
@@ -32,7 +33,7 @@ Eski buyruqlar (`/newtask`, `/tasks`, `/pending`, `/close <id>`, `/students`, `/
 **O'quvchi:**
 - `/start` bosib ro'yxatdan o'tadi
 - «📚 Vazifalar» → vazifani tanlab «📤 Topshirish»
-- «📊 Natijalarim» – baholar va izohlar
+- «📊 Natijalarim» – topshirgan ishlar soni, o'rtacha baho, baholar va izohlar
 
 ## Eslatma
 Ma'lumotlar `homework.db` (SQLite) faylida saqlanadi. O'quvchi botga `/start` bosmaguncha

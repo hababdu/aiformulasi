@@ -275,3 +275,77 @@ def user_results(user_id: int):
                WHERE s.user_id=? ORDER BY s.id DESC LIMIT 20""",
             (user_id,),
         ).fetchall()
+
+
+# ---------- statistika ----------
+def _num(grade) -> float | None:
+    try:
+        return float(grade)
+    except (TypeError, ValueError):
+        return None
+
+
+def stats_snapshot(exclude=()) -> dict:
+    """Statistika uchun hamma narsa bir joyda.
+
+    O'quvchi = botga /start bosgan yoki guruh a'zosi (o'qituvchilar chiqarib tashlanadi).
+    Har bir (vazifa, o'quvchi) juftligi uchun faqat OXIRGI topshiriq hisoblanadi.
+    """
+    exclude = set(exclude)
+    with closing(_conn()) as c:
+        students = [
+            dict(r)
+            for r in c.execute(
+                "SELECT id, full_name, username FROM users WHERE started=1 OR in_group=1 ORDER BY full_name"
+            )
+            if r["id"] not in exclude
+        ]
+        tasks = [dict(r) for r in c.execute("SELECT id, title, active FROM tasks ORDER BY id DESC")]
+        subs = [
+            dict(r)
+            for r in c.execute(
+                """SELECT task_id, user_id, status, grade FROM submissions
+                   WHERE id IN (SELECT MAX(id) FROM submissions GROUP BY task_id, user_id)"""
+            )
+        ]
+    ids = {s["id"] for s in students}
+    subs = [s for s in subs if s["user_id"] in ids]
+    for s in subs:
+        s["num"] = _num(s["grade"]) if s["status"] == "graded" else None
+
+    def avg(vals):
+        vals = [v for v in vals if v is not None]
+        return sum(vals) / len(vals) if vals else None
+
+    for t in tasks:
+        ts = [s for s in subs if s["task_id"] == t["id"]]
+        t["submitted"] = len(ts)
+        t["pending"] = sum(1 for s in ts if s["status"] == "pending")
+        t["redo"] = sum(1 for s in ts if s["status"] == "redo")
+        t["avg"] = avg(s["num"] for s in ts)
+        done = {s["user_id"] for s in ts}
+        t["missing"] = [st for st in students if st["id"] not in done]
+    for st in students:
+        mine = [s for s in subs if s["user_id"] == st["id"]]
+        st["submitted"] = len(mine)
+        st["avg"] = avg(s["num"] for s in mine)
+    return {
+        "students": students,
+        "tasks": tasks,
+        "subs": subs,
+        "avg": avg(s["num"] for s in subs),
+    }
+
+
+def student_summary(user_id: int) -> dict:
+    """O'quvchining o'z natijalari: nechta vazifa topshirgan va o'rtacha bahosi."""
+    snap = stats_snapshot()
+    active = [t for t in snap["tasks"] if t["active"]]
+    me = next((s for s in snap["students"] if s["id"] == user_id), None)
+    done = {s["task_id"] for s in snap["subs"] if s["user_id"] == user_id}
+    return {
+        "submitted": me["submitted"] if me else 0,
+        "avg": me["avg"] if me else None,
+        "total_tasks": len(snap["tasks"]),
+        "active_missing": [t["title"] for t in active if t["id"] not in done],
+    }

@@ -24,6 +24,7 @@ import config as cfg
 import db
 import keepalive
 import persist
+import stats
 from ui import (
     BTN_ADMIN_TASKS,
     BTN_NEWTASK,
@@ -500,6 +501,13 @@ async def my_results(message: Message, state: FSMContext):
     if not rows:
         await message.answer("Hali topshirilgan vazifa yo'q.")
         return
+    sm = db.student_summary(message.from_user.id)
+    head = f"📊 Topshirgan ishlaringiz: {sm['submitted']}/{sm['total_tasks']}  ·  ⭐ o'rtacha baho: " + (
+        f"{sm['avg']:.1f}" if sm["avg"] is not None else "–"
+    )
+    if sm["active_missing"]:
+        head += "\n⚠️ Hali topshirilmagan: " + ", ".join(sm["active_missing"][:5])
+    head += "\n\n"
     status_txt = {"pending": "⏳ tekshirilmoqda", "redo": "🔁 qayta topshiring"}
     lines = []
     for r in rows:
@@ -508,7 +516,7 @@ async def my_results(message: Message, state: FSMContext):
         if r["comment"]:
             line += f"\n   💬 {r['comment']}"
         lines.append(line)
-    await message.answer("\n".join(lines))
+    await message.answer(head + "\n".join(lines))
 
 
 # ======================= main =======================
@@ -530,6 +538,7 @@ async def main():
     db.init_db()
     dp = Dispatcher(storage=MemoryStorage())
     dp.include_router(admin_setup.router)
+    dp.include_router(stats.router)
     dp.include_router(router)
     background = [
         asyncio.create_task(keepalive.ping_loop()),

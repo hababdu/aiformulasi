@@ -18,6 +18,7 @@ BTN_PENDING = "📥 Tekshirilmagan"
 BTN_STUDENTS = "👥 O'quvchilar"
 BTN_BACKUP = "🗂 Zahira nusxa"
 BTN_SETTINGS = "⚙️ Sozlamalar"
+BTN_STATS = "📊 Statistika"
 
 MENU_BUTTONS = (
     BTN_TASKS,
@@ -28,6 +29,7 @@ MENU_BUTTONS = (
     BTN_STUDENTS,
     BTN_BACKUP,
     BTN_SETTINGS,
+    BTN_STATS,
 )
 
 # Holat (FSM) ichidagi matn handlerlari uchun filtrlar. Har doim `F.text` dan keyin qo'yiladi.
@@ -51,7 +53,8 @@ def admin_menu() -> ReplyKeyboardMarkup:
         keyboard=[
             [KeyboardButton(text=BTN_NEWTASK), KeyboardButton(text=BTN_ADMIN_TASKS)],
             [KeyboardButton(text=BTN_PENDING), KeyboardButton(text=BTN_STUDENTS)],
-            [KeyboardButton(text=BTN_BACKUP), KeyboardButton(text=BTN_SETTINGS)],
+            [KeyboardButton(text=BTN_STATS), KeyboardButton(text=BTN_BACKUP)],
+            [KeyboardButton(text=BTN_SETTINGS)],
         ],
         resize_keyboard=True,
     )
