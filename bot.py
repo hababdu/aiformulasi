@@ -344,10 +344,13 @@ async def on_grade(cb: CallbackQuery, state: FSMContext):
     _, sub_id, grade = cb.data.split(":")
     s = db.get_submission(int(sub_id))
     if not s or s["status"] != "pending":
+        await _mark_card(cb.bot, cb.message.chat.id, cb.message.message_id, s)  # eski tugmalarni olib tashlaymiz
         await cb.answer("Bu ish allaqachon tekshirilgan.", show_alert=True)
         return
     await state.set_state(Review.comment)
-    await state.update_data(sub_id=int(sub_id), grade=grade)
+    await state.update_data(
+        sub_id=int(sub_id), grade=grade, card_chat=cb.message.chat.id, card_msg=cb.message.message_id
+    )
     if grade == "redo":
         # Qaytarilgan ishda izoh majburiy: o'quvchi nimani tuzatishini bilishi kerak.
         await cb.message.answer(
@@ -379,6 +382,26 @@ async def on_comment_skip(cb: CallbackQuery, state: FSMContext, bot: Bot):
     await finish_review(bot, cb.message.chat.id, state, None)
 
 
+async def _mark_card(bot: Bot, chat_id: int, message_id: int, s) -> None:
+    """Tekshirilgan ish kartasidagi baho tugmalarini bitta natija tugmasiga almashtiradi,
+    shunda eski kartalar bosib ketilmaydi."""
+    if not s:
+        return
+    label = f"✅ Baho: {s['grade']}/10" if s["status"] == "graded" else "🔁 Qaytarilgan" if s["status"] == "redo" else None
+    if not label:
+        return
+    kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text=label, callback_data="noop")]])
+    try:
+        await bot.edit_message_reply_markup(chat_id=chat_id, message_id=message_id, reply_markup=kb)
+    except Exception:
+        pass
+
+
+@router.callback_query(F.data == "noop")
+async def noop(cb: CallbackQuery):
+    await cb.answer("Bu ish tekshirilgan. Ro'yxat: «✅ Tekshirilganlar»")
+
+
 async def finish_review(bot: Bot, chat_id: int, state: FSMContext, comment: str | None):
     data = await state.get_data()
     await state.clear()
@@ -403,6 +426,8 @@ async def finish_review(bot: Bot, chat_id: int, state: FSMContext, comment: str 
     if comment and grade != "redo":
         text += f"\n💬 Izoh: {comment}"
     archive.fire(archive.log_review(bot, s["id"]))
+    if data.get("card_msg"):
+        await _mark_card(bot, data["card_chat"], data["card_msg"], db.get_submission(s["id"]))
 
     try:
         await bot.send_message(s["user_id"], text, reply_markup=redo_kb)
