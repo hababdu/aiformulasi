@@ -21,7 +21,7 @@ python bot.py
 **O'qituvchi** (`ADMIN_IDS` dagi akkauntlar) pastdagi tugmalar bilan ishlaydi:
 - «➕ Yangi vazifa» – nom, tavsif, muddat kiritib vazifa berish (muddatsiz bo'lsa «⏭ Muddatsiz» tugmasi); hamma o'quvchilarga yuboriladi
 - «📋 Vazifalar» – faol vazifalar, tekshirilmagan ishlar soni va har biri uchun «🔒 Yopish» tugmasi
-- «📥 Tekshirilmagan» – tekshirilmagan ishlarni ko'rish (yangi ish kelganda o'qituvchiga o'zi yuborilmaydi, faqat shu tugma bosilganda ko'rsatiladi); ishda 1–10 baholardan birini yoki «Qayta topshirsin» tugmasini bosing, so'ng izoh yozing (baho uchun «⏭ Izohsiz» mumkin; qaytarilgan ishga izoh majburiy, o'quvchiga «📤 Qayta topshirish» tugmasi bilan yuboriladi)
+- «📥 Tekshirilmagan» – ishlar bittadan chiqadi, baholangach keyingisi keladi (yangi ish kelganda o'qituvchiga o'zi yuborilmaydi, faqat shu tugma bosilganda ko'rsatiladi); ishda 1–10 baholardan birini yoki «Qayta topshirsin» tugmasini bosing, so'ng izoh yozing (baho uchun «⏭ Izohsiz» mumkin; qaytarilgan ishga izoh majburiy, o'quvchiga «📤 Qayta topshirish» tugmasi bilan yuboriladi)
 - «👥 O'quvchilar» – guruhdan yig'ilgan o'quvchilar ro'yxati
 - «✅ Tekshirilganlar» – baholangan va qaytarilgan (hali qayta topshirilmagan) ishlar alohida ro'yxatda, sahifalab
 - «📊 Statistika» – umumiy ko'rinish, vazifalar bo'yicha topshirish foizi, o'quvchilar reytingi va topshirmaganlar ro'yxati (bo'limlar tugmalar bilan almashadi)

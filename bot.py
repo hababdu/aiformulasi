@@ -299,12 +299,14 @@ def review_keyboard(sub_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[row(range(10, 5, -1)), row(range(5, 0, -1)), redo])
 
 
-async def send_submission(bot: Bot, chat_id: int, sub_id: int):
+async def send_submission(bot: Bot, chat_id: int, sub_id: int, left: int = 0):
     s = db.get_submission(sub_id)
     if not s:
         return
     who = s["full_name"] + (f" (@{s['username']})" if s["username"] else "")
     header = f"📝 #{s['id']} | {s['task_title']}\n👤 {who}\n"
+    if left:
+        header += f"📥 Navbatda yana {left} ta\n"
     body = s["text"] or ""
     kb = review_keyboard(s["id"])
     if s["content_type"] == "photo":
@@ -319,12 +321,18 @@ async def send_submission(bot: Bot, chat_id: int, sub_id: int):
 @router.message(F.text == BTN_PENDING, F.func(lambda m: is_admin(m.from_user.id)))
 async def admin_pending(message: Message, bot: Bot, state: FSMContext):
     await state.clear()
+    await send_next_pending(bot, message.chat.id)
+
+
+async def send_next_pending(bot: Bot, chat_id: int, after_review: bool = False):
+    """Tekshirilmagan ishlardan faqat bittasini yuboradi; keyingisi shu ish baholangach chiqadi."""
     rows = db.pending_submissions()
     if not rows:
-        await message.answer("Tekshirilmagan ishlar yo'q 🎉")
+        await bot.send_message(
+            chat_id, "Hammasi tekshirildi 🎉" if after_review else "Tekshirilmagan ishlar yo'q 🎉"
+        )
         return
-    for r in rows:
-        await send_submission(bot, message.chat.id, r["id"])
+    await send_submission(bot, chat_id, rows[0]["id"], left=len(rows) - 1)
 
 
 # ======================= TEACHER: baholash =======================
@@ -401,6 +409,7 @@ async def finish_review(bot: Bot, chat_id: int, state: FSMContext, comment: str 
         await bot.send_message(chat_id, "Natija o'quvchiga yuborildi ✅")
     except Exception:
         await bot.send_message(chat_id, "Saqlandi, lekin o'quvchiga xabar yuborib bo'lmadi.")
+    await send_next_pending(bot, chat_id, after_review=True)  # keyingi ish
 
 
 # ======================= STUDENT: vazifalar =======================
